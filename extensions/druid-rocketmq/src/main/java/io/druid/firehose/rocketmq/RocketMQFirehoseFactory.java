@@ -65,6 +65,7 @@ public class RocketMQFirehoseFactory implements FirehoseFactory<ByteBufferInputR
         this.consumerGroup = consumerGroup;
         this.feed = feed;
         defaultMQPushConsumer = new DefaultMQPushConsumer(consumerGroup);
+        defaultMQPushConsumer.setPersistConsumerOffsetInterval(Integer.MAX_VALUE);
         defaultMQPushConsumer.setMessageModel(MessageModel.CLUSTERING);
         blockingQueue = new LinkedBlockingQueue<>(BLOCKING_QUEUE_SIZE);
     }
