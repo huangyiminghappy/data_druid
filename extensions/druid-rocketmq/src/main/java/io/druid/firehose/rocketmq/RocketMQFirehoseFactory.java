@@ -59,12 +59,12 @@ public class RocketMQFirehoseFactory implements FirehoseFactory<ByteBufferInputR
                                    @JsonProperty("consumerGroup") String consumerGroup,
                                    @JsonProperty("feed") String feed) {
         this.consumerProps = consumerProps;
-        for (Map.Entry<Object, Object> configItem : consumerProps.entrySet()) {
+        for (Map.Entry<Object, Object> configItem : this.consumerProps.entrySet()) {
             System.setProperty(configItem.getKey().toString(), configItem.getValue().toString());
         }
         this.consumerGroup = consumerGroup;
         this.feed = feed;
-        defaultMQPushConsumer = new DefaultMQPushConsumer(consumerGroup);
+        defaultMQPushConsumer = new DefaultMQPushConsumer(this.consumerGroup);
         defaultMQPushConsumer.setPersistConsumerOffsetInterval(Integer.MAX_VALUE);
         defaultMQPushConsumer.setMessageModel(MessageModel.CLUSTERING);
         blockingQueue = new LinkedBlockingQueue<>(BLOCKING_QUEUE_SIZE);
@@ -90,6 +90,7 @@ public class RocketMQFirehoseFactory implements FirehoseFactory<ByteBufferInputR
         );
 
         try {
+            defaultMQPushConsumer.subscribe(feed, "*");
             defaultMQPushConsumer.setMessageListener(new MessageListenerConcurrently() {
                 @Override
                 public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs,
