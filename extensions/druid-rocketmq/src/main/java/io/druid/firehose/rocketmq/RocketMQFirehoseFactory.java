@@ -11,11 +11,12 @@ import com.alibaba.rocketmq.common.protocol.heartbeat.MessageModel;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.Sets;
-import com.metamx.common.parsers.ParseException;
+import com.metamx.common.exception.FormattedException;
 import io.druid.data.input.ByteBufferInputRowParser;
 import io.druid.data.input.Firehose;
 import io.druid.data.input.FirehoseFactory;
 import io.druid.data.input.InputRow;
+import io.druid.data.input.impl.InputRowParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,6 +49,9 @@ public class RocketMQFirehoseFactory implements FirehoseFactory<ByteBufferInputR
     @JsonProperty
     private final String feed;
 
+    @JsonProperty
+    private final ByteBufferInputRowParser parser;
+
     private final DefaultMQPushConsumer defaultMQPushConsumer;
 
     private final LinkedBlockingQueue<Message> blockingQueue;
@@ -57,13 +61,15 @@ public class RocketMQFirehoseFactory implements FirehoseFactory<ByteBufferInputR
     @JsonCreator
     public RocketMQFirehoseFactory(@JsonProperty("consumerProps") Properties consumerProps,
                                    @JsonProperty("consumerGroup") String consumerGroup,
-                                   @JsonProperty("feed") String feed) {
+                                   @JsonProperty("feed") String feed,
+                                   @JsonProperty ByteBufferInputRowParser parser) {
         this.consumerProps = consumerProps;
         for (Map.Entry<Object, Object> configItem : consumerProps.entrySet()) {
             System.setProperty(configItem.getKey().toString(), configItem.getValue().toString());
         }
         this.consumerGroup = consumerGroup;
         this.feed = feed;
+        this.parser = parser;
         defaultMQPushConsumer = new DefaultMQPushConsumer(consumerGroup);
         defaultMQPushConsumer.setPersistConsumerOffsetInterval(Integer.MAX_VALUE);
         defaultMQPushConsumer.setMessageModel(MessageModel.CLUSTERING);
@@ -71,7 +77,7 @@ public class RocketMQFirehoseFactory implements FirehoseFactory<ByteBufferInputR
     }
 
     @Override
-    public Firehose connect(ByteBufferInputRowParser byteBufferInputRowParser) throws IOException, ParseException {
+    public Firehose connect(ByteBufferInputRowParser byteBufferInputRowParser) throws IOException {
 
         Set<String> newDimExclus = Sets.union(
                 byteBufferInputRowParser.getParseSpec().getDimensionsSpec().getDimensionExclusions(),
@@ -90,6 +96,7 @@ public class RocketMQFirehoseFactory implements FirehoseFactory<ByteBufferInputR
         );
 
         try {
+            defaultMQPushConsumer.subscribe(feed, "*");
             defaultMQPushConsumer.setMessageListener(new MessageListenerConcurrently() {
                 @Override
                 public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs,
@@ -128,20 +135,26 @@ public class RocketMQFirehoseFactory implements FirehoseFactory<ByteBufferInputR
                             RocketMQFirehoseFactory.this.wait();
                         }
                     } catch (InterruptedException e) {
-                        LOGGER.debug("No Messages available now. Waiting...");
+                        LOGGER.warn("No Messages available but wait() method got interrupted.");
+                        return false;
                     }
                 }
                 return true;
             }
 
             @Override
-            public InputRow nextRow() {
+            public InputRow nextRow() throws FormattedException {
+                Message message = null;
                 try {
-                    Message message = blockingQueue.take();
+                    message = blockingQueue.take();
                     return theParser.parse(ByteBuffer.wrap(message.getBody()));
-                } catch (InterruptedException e) {
-                    LOGGER.error("Error while paring message to InputRow");
-                    return null;
+                } catch (Exception e) {
+                    throw new FormattedException.Builder()
+                            .withErrorCode(FormattedException.ErrorCode.UNPARSABLE_ROW)
+                            .withMessage(String.format("Error parsing[%s], got [%s]",
+                                    null == message ? null : ByteBuffer.wrap(message.getBody()),
+                                    e.toString()))
+                            .build();
                 }
             }
 
@@ -150,7 +163,9 @@ public class RocketMQFirehoseFactory implements FirehoseFactory<ByteBufferInputR
                 return new Runnable() {
                     @Override
                     public void run() {
+                        LOGGER.info("To commit offsets.");
                         defaultMQPushConsumer.getDefaultMQPushConsumerImpl().persistConsumerOffset();
+                        LOGGER.info("Offsets committed.");
                     }
                 };
             }
@@ -160,5 +175,10 @@ public class RocketMQFirehoseFactory implements FirehoseFactory<ByteBufferInputR
                 defaultMQPushConsumer.shutdown();
             }
         };
+    }
+
+    @Override
+    public InputRowParser getParser() {
+        return parser;
     }
 }
