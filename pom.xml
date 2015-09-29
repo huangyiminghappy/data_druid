@@ -59,6 +59,7 @@
         <module>kafka-seven</module>
         <module>kafka-eight</module>
         <module>rabbitmq</module>
+        <module>extensions/druid-rocketmq</module>
     </modules>
 
     <dependencyManagement>
