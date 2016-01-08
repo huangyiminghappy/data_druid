@@ -440,7 +440,7 @@ public class RocketMQFirehoseFactory implements FirehoseFactory<ByteBufferInputR
         }
 
         /**
-         *
+         * Thread looping entry.
          */
         @Override
         public void run() {
